@@ -15,5 +15,5 @@ type Person struct {
 //		"method": "POST",
 //	}
 //
-//	fmt.Println(contains_word(hashmap, "method1"))
+//	fmt.Println(contains_player(hashmap, "method1"))
 //  }

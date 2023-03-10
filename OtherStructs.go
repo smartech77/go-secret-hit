@@ -10,7 +10,6 @@ type Match struct {
 	password          string
 	stage             string // this will dictate what can be done
 	substage          int
-	chairs            int
 	president         *Player
 	chancellor        *Player
 	hitler            *Player
@@ -20,16 +19,18 @@ type Match struct {
 	discardedpolicies []string
 	libDecs           int
 	fashDecs          int
+	failedElections   int
 	vetoEnabled       bool
 	game_stage_enum   game_stage_enum
 	fash_stage_enum   fash_stage_enum
 	election          election
 	waitingfor        string
 	currentaction     string
+	chancpolicies     []string
+	presidentpolicies []string
 }
 
 type election struct {
-	hasPassed       bool
 	totalvotes      int
 	ja              int
 	nein            int
@@ -38,15 +39,15 @@ type election struct {
 
 type Player struct {
 	//username string
-	password        string
-	name            string
-	party           string
-	isHitler        bool
-	isAlive         bool
-	hasVoted        bool
-	wasInvestigated bool
-	intel           string
-	index           int
+	password       string
+	name           string
+	party          string
+	isHitler       bool
+	isAlive        bool
+	hasVoted       bool
+	isTermLimited  bool
+	intel          []string
+	canseepolicies bool
 }
 
 type request struct {
@@ -57,8 +58,43 @@ type request struct {
 	target         string
 	index          int
 }
+type chancpolicies struct {
+}
+type presidentpolicies struct {
+}
 
-func (match *Match) getPresidents(president string) {
+// func (match *Match) checkIfPowerEnabled() []string {}
+func (match *Match) getCandidatesForChancellor() []string {
+
+	var playernames2 []string
+
+	for _, player := range match.players {
+		if player.isTermLimited == false {
+			playernames2 = append(playernames2, player.name)
+		}
+	}
+	return playernames2
+}
+func (match *Match) collapsegovernment() {
+	//also gotta do the random policy here
+
+	if match.policies[0] == "fascist" {
+		match.fashDecs++
+	}
+	if match.policies[0] == "liberal" {
+		match.libDecs++
+	}
+	for _, player := range match.players {
+		player.isTermLimited = false
+	}
+	match.policies = append(match.policies[:0], match.policies[1:]...)
+	match.currentaction = "waiting for president to pick a chancellor"
+	match.stage = match.game_stage_enum.election()
+	match.substage = 1
+}
+func (match *Match) addplayer(player Player) {
+}
+func (match *Match) getPresidents(president string) (int, int, []string) {
 	var playernames2 []string
 	for i := 0; i < len(match.playernames); i++ {
 		if match.players[match.playernames[i]].isAlive == true {
@@ -66,14 +102,22 @@ func (match *Match) getPresidents(president string) {
 		}
 
 	}
-	g := 0
+	presidentIndex := 0
+	nextpresidentIndex := 1
 	for i := 0; i < len(playernames2); i++ {
 		if playernames2[i] == president {
-			g = i
+			presidentIndex = i
+			break
 		}
 	}
+	if presidentIndex == len(playernames2)-1 {
+		nextpresidentIndex = 1
+	} else {
+		nextpresidentIndex = presidentIndex + 1
+	}
+
+	return presidentIndex, nextpresidentIndex, playernames2
 }
-func (match *Match) getCandidates() {}
 
 func (match *Match) getlivingplayers() int {
 	var aliveNumbers int = 0
@@ -86,7 +130,7 @@ func (match *Match) getlivingplayers() int {
 }
 
 func (match *Match) central_method(request request) {
-	if match.contains_word(match.players, request.name) {
+	if match.contains_player(match.players, request.name) {
 		if match.players[request.name].password == request.playerpassword && match.password == request.gamepassword {
 			match.central_methodv2(request)
 		}
@@ -95,7 +139,7 @@ func (match *Match) central_method(request request) {
 }
 
 func (match *Match) central_methodv2(request request) {
-	if match.stage == match.game_stage_enum.election() {
+	if match.stage == match.game_stage_enum.election() && request.action == "nominatechancellor" {
 		if match.substage == 1 && match.president.password == request.playerpassword && match.password == request.gamepassword {
 			match.chancellor = match.players[request.target]
 			match.waitingfor = "all"
@@ -103,7 +147,7 @@ func (match *Match) central_methodv2(request request) {
 			match.substage = 2
 		}
 
-		if match.substage == 2 && match.players[request.name].hasVoted == false {
+		if match.substage == 2 && match.players[request.name].hasVoted == false && request.action == "vote" {
 			if request.target == "ja" {
 				match.election.ja++
 			}
@@ -113,21 +157,51 @@ func (match *Match) central_methodv2(request request) {
 			match.players[request.name].hasVoted = true
 			match.election.totalvotes++
 			if match.getlivingplayers() == match.election.totalvotes {
-				match.election.hasPassed = true
-				match.waitingfor = match.chancellor.name
-				match.currentaction = "chancellor is looking at top 3 cards of the deck"
-				match.stage = match.game_stage_enum.policy()
-				match.substage = 1
+				// if the election succeeds
+				if match.election.ja > match.election.nein {
+					match.waitingfor = match.chancellor.name
+					match.currentaction = "chancellor is looking at top 3 cards of the deck"
+					match.stage = match.game_stage_enum.policy()
+					match.substage = 1
+
+					for _, player := range match.players {
+						player.isTermLimited = false
+					}
+					match.chancellor.isTermLimited = true
+					if match.getlivingplayers() > 5 {
+						match.president.isTermLimited = true
+					}
+					match.election.failedelections = 0
+				}
+				// if the election fails
+				if match.election.ja < match.election.nein {
+					match.failedElections++
+					_, nextpresidentIndex, playernames2 := match.getPresidents(match.president.name)
+
+					match.substage = 1
+					match.stage = match.game_stage_enum.election()
+					match.president = match.players[playernames2[nextpresidentIndex]]
+					// if the government is collapsed
+					if match.election.failedelections == 3 {
+						match.collapsegovernment()
+					}
+					match.election.failedelections = 0
+				}
+				// cleanup happens here
+				match.election.totalvotes = 0
+				match.election.ja = 0
+				match.election.nein = 0
+
+				for _, player := range match.players {
+					player.hasVoted = false
+				}
+
 			}
 
 		}
 	}
 }
 
-func (match *Match) containsPlayer() {}
-
-// this will add them to players, so that we can mutate them from launchgame
-func (match *Match) addplayer(player Player) {}
 func (match *Match) calcFashNumbers() int {
 	playersize := len(match.playernames)
 	if playersize > 8 {
@@ -139,7 +213,7 @@ func (match *Match) calcFashNumbers() int {
 	}
 	return 2
 }
-func (match *Match) contains_word(m map[string]*Player, suspect string) bool {
+func (match *Match) contains_player(m map[string]*Player, suspect string) bool {
 
 	if _, ok := m[suspect]; ok {
 		//	fmt.Printf("Value is : %s \n", v)
@@ -153,8 +227,6 @@ func (match *Match) contains_word(m map[string]*Player, suspect string) bool {
 }
 
 func (match *Match) randomize() {
-
-	// rand.Seed()
 	rand.Shuffle(len(match.playernames), func(i, j int) {
 		match.playernames[i], match.playernames[j] = match.playernames[j], match.playernames[i]
 	})
@@ -188,9 +260,7 @@ func (match *Match) LaunchGame() {
 	for helpers := 1; helpers < fashnumbers+1; helpers++ {
 		match.players[match.playernames[helpers]].party = "fascist"
 	}
-
 	match.randomize()
-
 	match.president = match.players[match.playernames[0]]
 
 	for i := 0; i < 6; i++ {
@@ -205,6 +275,32 @@ func (match *Match) LaunchGame() {
 	match.currentaction = "waiting for president to pick a chancellor"
 	match.stage = match.game_stage_enum.election()
 	match.substage = 1
+	var fascists []string
+	for _, player := range match.players {
+
+		if len(match.players) > 6 {
+			if player.party == "fascist" && player.isHitler == false {
+				fascists = append(fascists, player.name)
+			}
+		}
+
+		if len(match.players) < 7 {
+			if player.party == "fascist" {
+				fascists = append(fascists, player.name)
+			}
+		}
+
+	}
+	var intel = " The fascists are : "
+	var hitlerintel = "Hitler is actually : " + match.hitler.name
+	for i := range fascists {
+		intel = intel + fascists[i] + " , "
+	}
+	for i := range fascists {
+		match.players[fascists[i]].intel = append(match.players[fascists[i]].intel, intel)
+		match.players[fascists[i]].intel = append(match.players[fascists[i]].intel, hitlerintel)
+	}
+
 	//	fmt.Print(match.players)
 
 	//	fascistsSize := match.calcFashNumbers()
