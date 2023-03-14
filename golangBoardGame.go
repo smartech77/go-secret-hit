@@ -3,13 +3,22 @@ package main
 import "fmt"
 
 func main() {
-	main2()
+	main4()
 }
 func main4() {
 	//currentpresident := "4"
 	array := []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
-	fmt.Println(array[len(array)-1], array[10])
-	array = append(array[:5], array[6:]...)
+
+	for i := 0; i < 3; i++ {
+		fmt.Println(array[i])
+	}
+
+	for i := range array {
+		if i < 3 {
+			fmt.Println(array[i])
+		}
+	}
+
 	//	match := Match{playernames: array}
 	//	match.LaunchGame()
 	// step 1 filter alive people

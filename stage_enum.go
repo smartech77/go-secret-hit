@@ -21,21 +21,23 @@ func (fsg fash_stage_enum) veto() string {
 	return "veto"
 }
 
+func (fsg fash_stage_enum) none() string {
+	return "none"
+}
+
 type game_stage_enum struct {
 }
 
 func (gse game_stage_enum) election() string {
 	return "election"
 }
-func (gse game_stage_enum) specialelection() string {
-	return "specialelection"
-}
+
+//	func (gse game_stage_enum) specialelection() string {
+//		return "specialelection"
+//	}
 func (gse game_stage_enum) policy() string {
 	return "policy"
 }
 func (gse game_stage_enum) fascistpower() string {
 	return "fascist power"
-}
-func (gse game_stage_enum) none() string {
-	return "none"
 }
