@@ -3,118 +3,125 @@ package main
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 )
 
 type Match struct {
-	id                  string
-	password            string
-	stage               string // this will dictate what can be done
-	substage            int
-	president           *Player
-	chancellor          *Player
-	lastElected_pres    string
-	lastElected_chanc   string
-	hitler              *Player
-	players             map[string]*Player
-	playernames         []string
-	policies            []string
-	discardedpolicies   []string
-	FashPowers          []string
-	libDecs             int
-	fashDecs            int
-	failedElections     int
-	vetoEnabled         bool
-	chancellorWantsVeto bool
-	game_stage_enum     game_stage_enum
-	fash_stage_enum     fash_stage_enum
-	election            election
-	waitingfor          string
-	currentaction       string
+	lock                   sync.RWMutex
+	id                     string
+	scheduled_for_deletion bool
+	password               string
+	founder_password       string
+	stage                  string // this will dictate what can be done
+	substage               int
+	president              *Player
+	chancellor             *Player
+	lastElected_pres       string
+	lastElected_chanc      string
+	hitler                 *Player
+	players                map[string]*Player
+	playernames            []string
+	policies               []string
+	discardedpolicies      []string
+	FashPowers             []string
+	libDecs                int
+	fashDecs               int
+	failedElections        int
+	vetoEnabled            bool
+	chancellorWantsVeto    bool
+	game_stage_enum        game_stage_enum
+	fash_stage_enum        fash_stage_enum
+	election               election
+	waitingfor             string
+	currentaction          string
 }
 
 func (match *Match) central_method(request request) {
+	match.lock.Lock()
+	defer match.lock.Unlock()
 	if match.contains_player(match.players, request.name) && match.players[request.name].isAlive == true {
 		if match.players[request.name].password == request.playerpassword && match.password == request.gamepassword {
 			match.central_methodv2(request)
+			match.scheduled_for_deletion = false
 		}
 	}
-
 }
 
 func (match *Match) central_methodv2(request request) {
-	if match.stage == match.game_stage_enum.election() && request.action == "nominatechancellor" {
-		if match.substage == 1 && match.president.password == request.playerpassword && match.password == request.gamepassword {
+	if match.stage == match.game_stage_enum.election() && match.substage == 1 && request.action == "nominatechancellor" {
+		if match.president.password == request.playerpassword && match.password == request.gamepassword {
 			match.chancellor = match.players[request.target]
 			match.waitingfor = "all"
 			match.currentaction = "voting on the new government"
 			match.substage = 2
 		}
+	}
+	if match.substage == 2 && match.players[request.name].hasVoted == false && request.action == "vote" {
+		if request.target == "ja" {
+			match.election.ja++
+			match.players[request.name].votedFor = "ja"
+		}
+		if request.target == "nein" {
+			match.election.nein++
+			match.players[request.name].votedFor = "nein"
 
-		if match.substage == 2 && match.players[request.name].hasVoted == false && request.action == "vote" {
-			if request.target == "ja" {
-				match.election.ja++
-				match.players[request.name].votedFor = "ja"
+		}
+		match.players[request.name].hasVoted = true
+		match.election.totalvotes++
+		// if everyone has voted
+		if match.getlivingplayers() == match.election.totalvotes {
+			for _, player := range match.players {
+				player.hasVoted = false
 			}
-			if request.target == "nein" {
-				match.election.nein++
-				match.players[request.name].votedFor = "nein"
+			// if the election succeeds
+			if match.election.ja > match.election.nein {
 
-			}
-			match.players[request.name].hasVoted = true
-			match.election.totalvotes++
-			if match.getlivingplayers() == match.election.totalvotes {
-				// if the election succeeds
-				if match.election.ja > match.election.nein {
-
-					for i := 0; i < 3; i++ {
-						match.president.policies = append(match.president.policies, match.policies[0])
-						match.policies = append(match.policies[:0], match.policies[1:]...)
-					}
-
-					match.waitingfor = match.president.name
-					match.currentaction = "president is looking at top 3 cards of the deck"
-					match.stage = match.game_stage_enum.policy()
-					match.substage = 1
-
-					for _, player := range match.players {
-						player.isTermLimited = false
-					}
-
-					match.chancellor.isTermLimited = true
-					if match.getlivingplayers() > 5 {
-						match.president.isTermLimited = true
-					}
-					match.election.failedelections = 0
-					if match.election.specialelection == false {
-						match.election.lastnormalpresident = match.president.name
-					}
+				for i := 0; i < 3; i++ {
+					match.president.policies = append(match.president.policies, match.policies[0])
+					match.policies = append(match.policies[:0], match.policies[1:]...)
 				}
-				// if the election fails
-				if match.election.ja < match.election.nein {
-					match.failedElections++
-					_, nextpresidentIndex, playernames2 := match.getPresidents(match.election.lastnormalpresident)
 
-					match.substage = 1
-					match.stage = match.game_stage_enum.election()
-					match.president = match.players[playernames2[nextpresidentIndex]]
-					// if the government is collapsed
-					if match.election.failedelections == 3 {
-						match.collapsegovernment()
-						match.election.failedelections = 0
-
-					}
-				}
-				// cleanup happens here
-				match.election.totalvotes = 0
-				match.election.ja = 0
-				match.election.nein = 0
+				match.waitingfor = match.president.name
+				match.currentaction = "president is looking at top 3 cards of the deck"
+				match.stage = match.game_stage_enum.policy()
+				match.substage = 1
 
 				for _, player := range match.players {
-					player.hasVoted = false
+					player.isTermLimited = false
 				}
 
+				match.chancellor.isTermLimited = true
+				if match.getlivingplayers() > 5 {
+					match.president.isTermLimited = true
+				}
+				match.election.failedelections = 0
+				if match.election.specialelection == false {
+					match.election.lastnormalpresident = match.president.name
+				}
 			}
+			// if the election fails
+			if match.election.ja < match.election.nein {
+				match.failedElections++
+				_, nextpresidentIndex, playernames2 := match.getPresidents(match.election.lastnormalpresident)
 
+				match.substage = 1
+				match.stage = match.game_stage_enum.election()
+				match.president = match.players[playernames2[nextpresidentIndex]]
+				// if the government is collapsed
+				if match.election.failedelections == 3 {
+					match.collapsegovernment()
+					match.election.failedelections = 0
+
+				}
+			}
+			// cleanup happens here
+			match.election.totalvotes = 0
+			match.election.ja = 0
+			match.election.nein = 0
+
+			for _, player := range match.players {
+				player.hasVoted = false
+			}
 		}
 	}
 
@@ -273,6 +280,8 @@ func (match *Match) collapsegovernment() {
 	match.substage = 1
 }
 func (match *Match) addplayer(player Player) {
+
+	match.lock.Lock()
 
 	if len(match.players) < 10 {
 		match.players[player.name] = &player
