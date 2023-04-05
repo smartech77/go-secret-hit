@@ -282,7 +282,7 @@ func (match *Match) collapsegovernment() {
 func (match *Match) addplayer(player Player) {
 
 	match.lock.Lock()
-
+	defer match.lock.Unlock()
 	if len(match.players) < 10 {
 		match.players[player.name] = &player
 	}
